@@ -99,6 +99,54 @@ input:focus, select:focus, textarea:focus {
 
 .hint { font-size: 0.85rem; color: var(--muted); }
 .hint a { color: var(--accent-dark); }
+.optional { color: var(--muted); font-weight: 400; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.service-card { border-color: #d9ead8; }
+.service-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 650;
+}
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d6a33a;
+  box-shadow: 0 0 0 4px rgba(214, 163, 58, 0.14);
+}
+.service-status.ready .status-dot {
+  background: #39a96b;
+  box-shadow: 0 0 0 4px rgba(57, 169, 107, 0.14);
+}
+.service-status.error .status-dot {
+  background: #c94b40;
+  box-shadow: 0 0 0 4px rgba(201, 75, 64, 0.14);
+}
+
+.usage-box {
+  display: grid;
+  gap: 3px;
+  padding: 12px 14px;
+  margin: 8px 0 14px;
+  border: 1px solid #f1d4b9;
+  border-radius: 12px;
+  background: #fff8ef;
+  font-size: 0.9rem;
+}
+.usage-box strong { color: var(--accent-dark); }
+.usage-box small { color: var(--muted); }
 
 .options-grid {
   display: grid;
@@ -200,6 +248,25 @@ input:focus, select:focus, textarea:focus {
 }
 .results-actions .btn-primary { width: auto; padding: 10px 20px; }
 .results-actions select { width: auto; }
+.profile-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff8ef;
+  font-size: 0.85rem;
+}
+.validation-summary {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #eef8f1;
+  color: #257347;
+  font-size: 0.88rem;
+}
+.validation-summary.warning { background: #fff4e3; color: #92570e; }
+.validation-summary.error { background: #fdf0ee; color: #a93226; }
 
 .grid {
   display: grid;
@@ -262,4 +329,6 @@ input:focus, select:focus, textarea:focus {
 @media (max-width: 480px) {
   .card { padding: 16px; }
   .site-header { padding-top: 28px; }
+  .results-header .results-actions { align-items: stretch; }
+  .results-actions .btn-primary { width: 100%; }
 }

@@ -1,7 +1,7 @@
 /**
  * APNG 조립기 — 같은 크기의 PNG 프레임들(Uint8Array)을 움직이는 PNG로 합친다.
  * 브라우저 <img>가 그대로 재생하며, 알파(투명 배경)를 완벽 지원한다.
- * makeApng(frames, delayMs) => Uint8Array
+ * makeApng(frames, delayMs, plays) => Uint8Array
  */
 (function () {
   "use strict";
@@ -57,7 +57,7 @@
    * @param {Uint8Array[]} frames  같은 크기/포맷의 PNG 프레임들
    * @param {number} delayMs       프레임당 지연 (ms)
    */
-  function makeApng(frames, delayMs = 300) {
+  function makeApng(frames, delayMs = 300, plays = 0) {
     if (frames.length === 0) throw new Error("프레임이 없어요.");
     const first = parseChunks(frames[0]);
     const ihdr = first.find((c) => c.type === "IHDR");
@@ -68,7 +68,7 @@
     const delayNum = Math.max(1, Math.round(delayMs / 10)); // 1/100초 단위
     const parts = [new Uint8Array(PNG_SIG)];
     writeChunk(parts, "IHDR", ihdr.data);
-    writeChunk(parts, "acTL", u32be(frames.length, 0)); // 무한 반복
+    writeChunk(parts, "acTL", u32be(frames.length, Math.max(0, plays | 0)));
 
     let seq = 0;
     const fcTL = (w, h) => {

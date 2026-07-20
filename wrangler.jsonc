@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "imoticon-maker",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-07-20",
+  "ai": {
+    "binding": "AI"
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "QUOTA_COUNTER",
+        "class_name": "QuotaCounter"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["QuotaCounter"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

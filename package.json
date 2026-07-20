@@ -1,0 +1,15 @@
+{
+  "name": "imoticon-maker",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test",
+    "check": "node --check worker/index.js && node --test"
+  },
+  "devDependencies": {
+    "wrangler": "^4.26.0"
+  }
+}
