@@ -77,7 +77,7 @@
         ? " Match the character design in the reference image exactly (same species, colors, markings, proportions and accessories)."
         : "";
     const frameNote = opts.frameDesc
-      ? ` This is frame 1 of a short looping animation. Pose for this frame: ${opts.frameDesc}.`
+      ? ` This is frame ${(opts.frameIndex || 0) + 1} of a short looping sticker animation; keep the background, framing and character position identical across frames. Pose for this frame: ${opts.frameDesc}.`
       : "";
     return (
       `A single messenger emoticon sticker of one character, centered on a plain pure white background. ` +
@@ -95,7 +95,17 @@
   async function fetchWithRetry(url, options, { retries = 3, signal } = {}) {
     let delay = 2000;
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(url, { ...options, signal });
+      let res;
+      try {
+        res = await fetch(url, { ...options, signal });
+      } catch (err) {
+        if (err.name === "AbortError") throw err;
+        // CORS 차단 또는 네트워크 단절 — fetch는 상세 이유를 숨기므로 안내를 덧붙인다
+        throw new Error(
+          "네트워크 오류: API에 연결할 수 없어요. 인터넷 연결을 확인해 주세요. " +
+          "(이 API 제공자가 브라우저 직접 호출(CORS)을 막는 환경일 수도 있어요)"
+        );
+      }
       if (res.ok) return res;
       const retriable = res.status === 429 || res.status >= 500;
       const body = await res.text().catch(() => "");
@@ -135,6 +145,7 @@
 
   const gemini = {
     label: "Google Gemini",
+    supportsReference: true, // 이미지 생성에 참조 이미지 입력 가능
 
     async plan(apiKey, opts, signal) {
       const parts = [];
@@ -200,6 +211,7 @@
 
   const openai = {
     label: "OpenAI",
+    supportsReference: true, // images/edits로 참조 이미지 입력 가능
 
     async plan(apiKey, opts, signal) {
       const content = [];
@@ -309,6 +321,86 @@
     },
   };
 
-  window.Providers = { gemini, openai };
+  /* ---------------- xAI Grok ---------------- */
+
+  const XAI_BASE = "https://api.x.ai/v1";
+
+  const xai = {
+    label: "xAI Grok",
+    // grok-2-image는 이미지 입력을 받지 않는다 → 참조 이미지는 기획(비전) 단계에만 반영되고,
+    // 애니메이션 프레임도 이전 프레임 참조 없이 텍스트만으로 그린다 (일관성이 다소 낮음).
+    supportsReference: false,
+
+    async plan(apiKey, opts, signal) {
+      try {
+        return await this._plan(apiKey, opts, signal, "grok-4-fast-non-reasoning", true);
+      } catch (err) {
+        if (err.name === "AbortError") throw err;
+        if (/model|not found|does not exist|invalid/i.test(err.message)) {
+          // 구형 계정/모델명 변경 대비: 텍스트 전용 모델로 대체 (참조 이미지는 무시됨)
+          return await this._plan(apiKey, opts, signal, "grok-3-mini", false);
+        }
+        throw err;
+      }
+    },
+
+    async _plan(apiKey, opts, signal, model, vision) {
+      const content = [
+        { type: "text", text: buildPlanPrompt({ ...opts, hasReference: vision && !!opts.reference }) },
+      ];
+      if (vision && opts.reference) {
+        content.push({
+          type: "image_url",
+          image_url: { url: `data:${opts.reference.mimeType};base64,${opts.reference.base64}` },
+        });
+      }
+      const res = await fetchWithRetry(
+        `${XAI_BASE}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: 0.9,
+            messages: [{ role: "user", content }],
+          }),
+        },
+        { signal }
+      );
+      const data = await res.json();
+      return parsePlanJson(data.choices?.[0]?.message?.content || "");
+    },
+
+    async generateImage(apiKey, prompt, { signal } = {}) {
+      // grok-2-image는 size/quality/배경 옵션이 없다 → 투명화는 클라이언트에서 처리
+      const res = await fetchWithRetry(
+        `${XAI_BASE}/images/generations`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: "grok-2-image",
+            prompt,
+            n: 1,
+            response_format: "b64_json",
+          }),
+        },
+        { signal }
+      );
+      const data = await res.json();
+      const item = data.data?.[0];
+      if (item?.b64_json) return `data:image/jpeg;base64,${item.b64_json}`;
+      if (item?.url) return item.url;
+      throw new Error("이미지 생성 실패: 응답에 이미지가 없어요.");
+    },
+  };
+
+  window.Providers = { gemini, openai, xai };
   window.PromptBuilder = { buildImagePrompt };
 })();

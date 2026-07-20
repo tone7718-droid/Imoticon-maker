@@ -14,8 +14,14 @@
 - **배경 투명화** — gpt-image-1은 API 네이티브 투명 배경, 그 외 모델은 가장자리 flood-fill 알고리즘으로 흰 배경만 정확히 제거합니다 (캐릭터 안의 흰 부분은 보존).
 - **움직이는 이모티콘 (APNG + GIF)** — 컷마다 4프레임 동작을 AI가 기획하고, 1번 프레임을 참조 이미지로 삼아 2~4번 프레임을 그려 프레임 간 일관성을 유지합니다. 브라우저에서 직접 APNG와 GIF로 인코딩합니다 (외부 라이브러리 없음).
 - **AI 제공자 선택 (BYOK)** — 내 API 키로 직접 호출합니다.
-  - Google Gemini: 기획 `gemini-2.5-flash` + 이미지 `gemini-2.5-flash-image` (무료 할당량 있음, 추천)
-  - OpenAI: 기획 `gpt-4o-mini` + 이미지 `gpt-image-1` (권한 없으면 자동으로 `dall-e-3` 대체)
+
+  | 제공자 | 기획 모델 | 이미지 모델 | 이미지 참조 입력 | 비고 |
+  |---|---|---|---|---|
+  | Google Gemini (추천) | `gemini-2.5-flash` | `gemini-2.5-flash-image` | ✅ | 무료 할당량 있음 |
+  | OpenAI | `gpt-4o-mini` | `gpt-image-1` (→`dall-e-3` 자동 대체) | ✅ (`images/edits`) | 투명 배경 API 지원 |
+  | xAI Grok | `grok-4-fast-non-reasoning` (→`grok-3-mini` 대체) | `grok-2-image` | ❌ | 참조 이미지는 기획에만 반영, 프레임 일관성 낮음 |
+
+  새 제공자는 `js/providers.js`에 어댑터 객체(`plan` + `generateImage` + `supportsReference` 플래그) 하나만 추가하면 됩니다.
 - **스타일 선택** — 귀여운 스티커풍 / 파스텔 / 카툰 / 라인 드로잉 / 수채화
 - **한글 문구 옵션** — 이모티콘 안에 짧은 한글 문구("더워…", "최고!") 포함 가능
 - **개별 재생성** — 마음에 안 드는 컷만 골라서 다시 그리기

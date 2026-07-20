@@ -15,6 +15,7 @@
     toggleKey: $("#toggle-key"),
     saveKey: $("#save-key"),
     keyHint: $("#key-hint"),
+    providerNote: $("#provider-note"),
     description: $("#description"),
     refFile: $("#ref-file"),
     refPick: $("#ref-pick"),
@@ -76,6 +77,8 @@
     els.keyHint.querySelectorAll("a[data-provider]").forEach((a) => {
       a.hidden = a.dataset.provider !== els.provider.value;
     });
+    els.providerNote.hidden =
+      window.Providers[els.provider.value]?.supportsReference !== false;
   }
 
   /* ---------- UI 이벤트 ---------- */
@@ -171,6 +174,7 @@
       const ideas = plan.ideas.slice(0, count);
 
       session = {
+        providerKey: els.provider.value, // 재생성 시 같은 제공자를 쓰도록 고정
         character: plan.character,
         styleKey: els.style.value,
         animated,
@@ -257,7 +261,11 @@
 
   /** 한 장 생성 (+URL 응답 처리 + 배경 투명화) */
   async function generateSingle(provider, apiKey, item, signal, { frameDesc, frameIndex, frameRef }) {
-    const refMode = frameRef ? "frame" : session.reference ? "user" : null;
+    // 참조 이미지 입력을 지원하지 않는 제공자(xAI)는 프롬프트에서도 참조 문구를 뺀다
+    const canRef = provider.supportsReference !== false;
+    const usableFrameRef = canRef ? frameRef : null;
+    const usableUserRef = canRef ? session.reference : null;
+    const refMode = usableFrameRef ? "frame" : usableUserRef ? "user" : null;
     const prompt = window.PromptBuilder.buildImagePrompt(
       session.character,
       item.idea,
@@ -266,7 +274,7 @@
     );
     let dataUrl = await provider.generateImage(apiKey, prompt, {
       signal,
-      reference: frameRef || session.reference,
+      reference: usableFrameRef || usableUserRef,
       transparent: session.transparent,
     });
     if (dataUrl.startsWith("http")) {
@@ -393,7 +401,7 @@
   }
 
   async function regenerateOne(item, index) {
-    const provider = window.Providers[els.provider.value];
+    const provider = window.Providers[session?.providerKey || els.provider.value];
     const apiKey = els.apiKey.value.trim();
     if (!apiKey) return alert("API 키를 입력해 주세요.");
     await generateOne(provider, apiKey, item, index, undefined, undefined);

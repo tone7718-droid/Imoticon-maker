@@ -23,6 +23,7 @@
       <select id="provider">
         <option value="gemini">Google Gemini (추천 · 무료 할당량 있음)</option>
         <option value="openai">OpenAI (GPT + gpt-image / DALL·E)</option>
+        <option value="xai">xAI Grok (grok-2 이미지)</option>
       </select>
     </div>
     <div class="form-row">
@@ -38,7 +39,12 @@
     <p class="hint" id="key-hint">
       키 발급: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" data-provider="gemini">Google AI Studio</a>
       <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" data-provider="openai" hidden>OpenAI 대시보드</a>
+      <a href="https://console.x.ai" target="_blank" rel="noopener" data-provider="xai" hidden>xAI 콘솔</a>
       — 키는 서버로 전송되지 않고, 브라우저에서 AI API로 직접 호출돼요.
+    </p>
+    <p class="hint" id="provider-note" hidden>
+      ⚠ Grok의 이미지 모델(grok-2-image)은 이미지 참조 입력을 지원하지 않아요.
+      참조 이미지는 기획 단계에만 반영되고, 움직이는 이모티콘의 프레임 일관성이 낮을 수 있어요.
     </p>
   </section>
 
