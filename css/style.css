@@ -107,6 +107,27 @@ input:focus, select:focus, textarea:focus {
   margin-top: 14px;
 }
 
+.ref-row { margin-top: 14px; }
+.ref-upload { display: flex; align-items: center; gap: 12px; }
+.ref-preview {
+  position: relative;
+  width: 72px; height: 72px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background:
+    repeating-conic-gradient(#f3eee6 0% 25%, #ffffff 0% 50%) 0 0 / 16px 16px;
+}
+.ref-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.ref-preview .btn-icon {
+  position: absolute;
+  top: 2px; right: 2px;
+  padding: 0 6px;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  background: rgba(255, 255, 255, 0.9);
+}
+
 .example-chips {
   display: flex;
   flex-wrap: wrap;

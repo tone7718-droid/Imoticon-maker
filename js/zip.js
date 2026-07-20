@@ -94,4 +94,5 @@
   }
 
   window.makeZip = makeZip;
+  window.crc32 = crc32; // apng.js / gif.js에서 공유
 })();

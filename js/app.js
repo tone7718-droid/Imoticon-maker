@@ -1,6 +1,8 @@
 /**
  * 이모티콘 메이커 — 메인 앱 로직
- * 흐름: 설명 입력 → AI가 세트 기획(캐릭터 시트 + 장면 목록) → 장면별 이미지 생성 → 다운로드
+ * 흐름: 설명(+참조 이미지) 입력 → AI가 세트 기획(캐릭터 시트 + 장면 목록)
+ *       → 장면별 이미지 생성 (움직이는 이모티콘은 프레임 4장씩)
+ *       → 배경 투명화 → PNG/APNG/GIF/ZIP 다운로드
  */
 (function () {
   "use strict";
@@ -14,9 +16,17 @@
     saveKey: $("#save-key"),
     keyHint: $("#key-hint"),
     description: $("#description"),
+    refFile: $("#ref-file"),
+    refPick: $("#ref-pick"),
+    refPreview: $("#ref-preview"),
+    refImg: $("#ref-img"),
+    refRemove: $("#ref-remove"),
     count: $("#count"),
     style: $("#style"),
     captionMode: $("#caption-mode"),
+    format: $("#format"),
+    transparentBg: $("#transparent-bg"),
+    animatedHint: $("#animated-hint"),
     generateBtn: $("#generate-btn"),
     sectionProgress: $("#section-progress"),
     progressFill: $("#progress-fill"),
@@ -30,9 +40,16 @@
   };
 
   const CONCURRENCY = 2;
+  const FRAME_COUNT = 4;
+  const FRAME_DELAY_MS = 300;
+  const PREVIEW_SIZE = 360;
+
   let abortController = null;
-  // 현재 세트 상태: { character, styleKey, items: [{idea, status, dataUrl, error, card}] }
+  // 현재 세트 상태:
+  // { character, styleKey, animated, transparent, reference,
+  //   items: [{ idea, status, dataUrl, frames, error, card }] }
   let session = null;
+  let referenceImage = null; // { mimeType, base64, dataUrl }
 
   /* ---------- API 키 저장/불러오기 ---------- */
 
@@ -73,6 +90,32 @@
     els.apiKey.type = els.apiKey.type === "password" ? "text" : "password";
   });
 
+  els.refPick.addEventListener("click", () => els.refFile.click());
+  els.refFile.addEventListener("change", async () => {
+    const file = els.refFile.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await window.ImageProc.normalizeUpload(file);
+      const { mimeType, base64 } = window.ImageProc.dataUrlToParts(dataUrl);
+      referenceImage = { mimeType, base64, dataUrl };
+      els.refImg.src = dataUrl;
+      els.refPreview.hidden = false;
+      els.refPick.textContent = "🖼 다른 이미지로 바꾸기";
+    } catch (err) {
+      alert(`이미지를 불러올 수 없어요: ${err.message}`);
+    }
+  });
+  els.refRemove.addEventListener("click", () => {
+    referenceImage = null;
+    els.refFile.value = "";
+    els.refPreview.hidden = true;
+    els.refPick.textContent = "🖼 이미지 올리기";
+  });
+
+  els.format.addEventListener("change", () => {
+    els.animatedHint.hidden = els.format.value !== "animated";
+  });
+
   document.querySelectorAll(".chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       els.description.value =
@@ -92,8 +135,7 @@
   /* ---------- 생성 파이프라인 ---------- */
 
   async function startGeneration() {
-    const providerKey = els.provider.value;
-    const provider = window.Providers[providerKey];
+    const provider = window.Providers[els.provider.value];
     const apiKey = els.apiKey.value.trim();
     const description = els.description.value.trim();
 
@@ -112,9 +154,18 @@
 
     try {
       const count = parseInt(els.count.value, 10);
+      const animated = els.format.value === "animated";
       const plan = await provider.plan(
         apiKey,
-        { description, count, captionMode: els.captionMode.value },
+        {
+          description,
+          count,
+          captionMode: els.captionMode.value,
+          animated,
+          reference: referenceImage
+            ? { mimeType: referenceImage.mimeType, base64: referenceImage.base64 }
+            : null,
+        },
         signal
       );
       const ideas = plan.ideas.slice(0, count);
@@ -122,7 +173,14 @@
       session = {
         character: plan.character,
         styleKey: els.style.value,
-        items: ideas.map((idea) => ({ idea, status: "pending", dataUrl: null, error: null, card: null })),
+        animated,
+        transparent: els.transparentBg.checked,
+        reference: referenceImage
+          ? { mimeType: referenceImage.mimeType, base64: referenceImage.base64 }
+          : null,
+        items: ideas.map((idea) => ({
+          idea, status: "pending", dataUrl: null, frames: null, error: null, card: null,
+        })),
       };
 
       els.characterSummary.textContent = `캐릭터 설정: ${plan.character}`;
@@ -132,19 +190,24 @@
         els.resultsGrid.appendChild(item.card);
       });
 
-      setProgress(5, `기획 완료! 이모티콘 ${ideas.length}개를 그리는 중… (0/${ideas.length})`);
+      const totalUnits = ideas.length * (animated ? FRAME_COUNT : 1);
+      let doneUnits = 0;
+      const onUnit = () => {
+        doneUnits++;
+        setProgress(
+          5 + Math.round((doneUnits / totalUnits) * 95),
+          animated
+            ? `프레임을 그리는 중… (${doneUnits}/${totalUnits}장)`
+            : `이모티콘을 그리는 중… (${doneUnits}/${totalUnits})`
+        );
+      };
+      setProgress(5, `기획 완료! 이모티콘 ${ideas.length}개를 그리는 중…`);
 
-      let done = 0;
       const queue = session.items.map((item, i) => ({ item, i }));
       const workers = Array.from({ length: CONCURRENCY }, async () => {
         while (queue.length > 0 && !signal.aborted) {
           const { item, i } = queue.shift();
-          await generateOne(provider, apiKey, item, i, signal);
-          done++;
-          setProgress(
-            5 + Math.round((done / session.items.length) * 95),
-            `이모티콘을 그리는 중… (${done}/${session.items.length})`
-          );
+          await generateOne(provider, apiKey, item, i, signal, onUnit);
         }
       });
       await Promise.all(workers);
@@ -169,20 +232,16 @@
     }
   }
 
-  async function generateOne(provider, apiKey, item, index, signal) {
+  async function generateOne(provider, apiKey, item, index, signal, onUnit) {
     item.status = "loading";
     updateCard(item, index);
     try {
-      const prompt = window.PromptBuilder.buildImagePrompt(
-        session.character,
-        item.idea,
-        session.styleKey
-      );
-      let dataUrl = await provider.generateImage(apiKey, prompt, signal);
-      if (dataUrl.startsWith("http")) {
-        dataUrl = await urlToDataUrl(dataUrl).catch(() => dataUrl);
+      if (session.animated) {
+        await generateAnimated(provider, apiKey, item, signal, onUnit);
+      } else {
+        item.dataUrl = await generateSingle(provider, apiKey, item, signal, {});
+        onUnit?.();
       }
-      item.dataUrl = dataUrl;
       item.status = "done";
       item.error = null;
     } catch (err) {
@@ -194,6 +253,67 @@
       }
     }
     updateCard(item, index);
+  }
+
+  /** 한 장 생성 (+URL 응답 처리 + 배경 투명화) */
+  async function generateSingle(provider, apiKey, item, signal, { frameDesc, frameIndex, frameRef }) {
+    const refMode = frameRef ? "frame" : session.reference ? "user" : null;
+    const prompt = window.PromptBuilder.buildImagePrompt(
+      session.character,
+      item.idea,
+      session.styleKey,
+      { frameDesc, frameIndex: frameIndex || 0, refMode }
+    );
+    let dataUrl = await provider.generateImage(apiKey, prompt, {
+      signal,
+      reference: frameRef || session.reference,
+      transparent: session.transparent,
+    });
+    if (dataUrl.startsWith("http")) {
+      dataUrl = await urlToDataUrl(dataUrl).catch(() => dataUrl);
+    }
+    if (session.transparent) {
+      dataUrl = await window.ImageProc.removeWhiteBackground(dataUrl).catch(() => dataUrl);
+    }
+    return dataUrl;
+  }
+
+  /** 프레임 4장 생성: 1번을 기준 프레임으로, 나머지는 1번 이미지를 참조해 그린다 */
+  async function generateAnimated(provider, apiKey, item, signal, onUnit) {
+    const descs = (Array.isArray(item.idea.frames) && item.idea.frames.length > 0
+      ? item.idea.frames
+      : ["base pose", "slight bounce up", "back to base pose", "slight lean down"]
+    ).slice(0, FRAME_COUNT);
+    while (descs.length < FRAME_COUNT) descs.push(descs[descs.length - 1]);
+
+    const frames = [];
+    for (let f = 0; f < descs.length; f++) {
+      if (signal?.aborted) throw new DOMException("중단됨", "AbortError");
+      const frameRef =
+        f === 0 ? null : window.ImageProc.dataUrlToParts(frames[0]);
+      const dataUrl = await generateSingle(provider, apiKey, item, signal, {
+        frameDesc: descs[f],
+        frameIndex: f,
+        frameRef,
+      });
+      frames.push(dataUrl);
+      onUnit?.();
+    }
+    item.frames = frames;
+    item.dataUrl = await assembleApngDataUrl(frames, PREVIEW_SIZE);
+  }
+
+  async function assembleApngDataUrl(frames, size) {
+    const pngFrames = [];
+    for (const f of frames) pngFrames.push(await window.ImageProc.toPngBytes(f, size));
+    const bytes = window.makeApng(pngFrames, FRAME_DELAY_MS);
+    const blob = new Blob([bytes], { type: "image/png" });
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   }
 
   async function urlToDataUrl(url) {
@@ -238,17 +358,28 @@
 
     if (item.status === "done" && item.dataUrl) {
       const img = document.createElement("img");
-      img.src = item.dataUrl;
+      img.src = item.dataUrl; // APNG dataURL은 <img>에서 그대로 재생됨
       img.alt = item.idea.title;
       imgWrap.appendChild(img);
 
-      const dl = document.createElement("button");
-      dl.textContent = "⬇ 저장";
-      dl.addEventListener("click", () => downloadOne(item, index));
+      if (item.frames) {
+        const dlApng = document.createElement("button");
+        dlApng.textContent = "⬇ APNG";
+        dlApng.addEventListener("click", () => downloadAnimated(item, index, "apng"));
+        const dlGif = document.createElement("button");
+        dlGif.textContent = "⬇ GIF";
+        dlGif.addEventListener("click", () => downloadAnimated(item, index, "gif"));
+        actions.append(dlApng, dlGif);
+      } else {
+        const dl = document.createElement("button");
+        dl.textContent = "⬇ 저장";
+        dl.addEventListener("click", () => downloadOne(item, index));
+        actions.appendChild(dl);
+      }
       const re = document.createElement("button");
       re.textContent = "🔄 다시";
       re.addEventListener("click", () => regenerateOne(item, index));
-      actions.append(dl, re);
+      actions.appendChild(re);
     } else if (item.status === "error") {
       const msg = document.createElement("div");
       msg.className = "error-msg";
@@ -265,7 +396,7 @@
     const provider = window.Providers[els.provider.value];
     const apiKey = els.apiKey.value.trim();
     if (!apiKey) return alert("API 키를 입력해 주세요.");
-    await generateOne(provider, apiKey, item, index, undefined);
+    await generateOne(provider, apiKey, item, index, undefined, undefined);
   }
 
   /* ---------- 다운로드 ---------- */
@@ -274,36 +405,53 @@
     return name.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 30) || "emoticon";
   }
 
-  function fileNameFor(item, index) {
-    return `${String(index + 1).padStart(2, "0")}_${sanitizeFilename(item.idea.title)}.png`;
+  function fileNameFor(item, index, ext = "png") {
+    return `${String(index + 1).padStart(2, "0")}_${sanitizeFilename(item.idea.title)}.${ext}`;
   }
 
-  /** dataURL을 지정 크기의 PNG Uint8Array로 변환 (0이면 원본 크기 유지) */
-  async function toPngBytes(dataUrl, size) {
-    const img = await new Promise((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error("이미지 디코딩 실패"));
-      image.src = dataUrl;
-    });
-    const w = size > 0 ? size : img.naturalWidth;
-    const h = size > 0 ? size : img.naturalHeight;
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(img, 0, 0, w, h);
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!blob) throw new Error("PNG 변환 실패");
-    return new Uint8Array(await blob.arrayBuffer());
+  function exportSize() {
+    return parseInt(els.exportSize.value, 10);
+  }
+
+  // 애니메이션은 모든 프레임 크기가 같아야 하므로 "원본"이면 첫 프레임 크기로 통일
+  async function resolveFrameSize(item, size) {
+    if (size > 0) return size;
+    const img = await window.ImageProc.loadImage(item.frames[0]);
+    return img.naturalWidth;
+  }
+
+  async function buildApngBytes(item, size) {
+    const s = await resolveFrameSize(item, size);
+    const pngFrames = [];
+    for (const f of item.frames) pngFrames.push(await window.ImageProc.toPngBytes(f, s));
+    return window.makeApng(pngFrames, FRAME_DELAY_MS);
+  }
+
+  async function buildGifBytes(item, size) {
+    const s = await resolveFrameSize(item, size);
+    const frames = [];
+    for (const f of item.frames) frames.push(await window.ImageProc.toImageData(f, s));
+    return window.makeGif(frames, FRAME_DELAY_MS);
   }
 
   async function downloadOne(item, index) {
     try {
-      const size = parseInt(els.exportSize.value, 10);
-      const bytes = await toPngBytes(item.dataUrl, size);
+      const bytes = await window.ImageProc.toPngBytes(item.dataUrl, exportSize());
       saveBlob(new Blob([bytes], { type: "image/png" }), fileNameFor(item, index));
+    } catch (err) {
+      alert(`저장 실패: ${err.message}`);
+    }
+  }
+
+  async function downloadAnimated(item, index, format) {
+    try {
+      if (format === "gif") {
+        const bytes = await buildGifBytes(item, exportSize());
+        saveBlob(new Blob([bytes], { type: "image/gif" }), fileNameFor(item, index, "gif"));
+      } else {
+        const bytes = await buildApngBytes(item, exportSize());
+        saveBlob(new Blob([bytes], { type: "image/png" }), fileNameFor(item, index, "png"));
+      }
     } catch (err) {
       alert(`저장 실패: ${err.message}`);
     }
@@ -319,11 +467,18 @@
     els.downloadAllBtn.disabled = true;
     els.downloadAllBtn.textContent = "묶는 중…";
     try {
-      const size = parseInt(els.exportSize.value, 10);
+      const size = exportSize();
       const files = [];
       for (const { item, index } of doneItems) {
-        const bytes = await toPngBytes(item.dataUrl, size);
-        files.push({ name: fileNameFor(item, index), data: bytes });
+        if (item.frames) {
+          files.push({ name: fileNameFor(item, index, "png"), data: await buildApngBytes(item, size) });
+          files.push({ name: fileNameFor(item, index, "gif"), data: await buildGifBytes(item, size) });
+        } else {
+          files.push({
+            name: fileNameFor(item, index),
+            data: await window.ImageProc.toPngBytes(item.dataUrl, size),
+          });
+        }
       }
       saveBlob(window.makeZip(files), "emoticons.zip");
     } catch (err) {

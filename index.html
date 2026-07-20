@@ -47,6 +47,20 @@
     <h2><span class="step-num">2</span> 어떤 이모티콘을 만들까요?</h2>
     <textarea id="description" rows="4"
       placeholder="예) 여름에 더위에 시달리는 너구리 캐릭터를 기반으로 이모티콘을 만들어줘. 상황에 따라서 표정 변화와 그 감정을 잘 느낄 수 있도록 해주면 돼."></textarea>
+
+    <div class="form-row ref-row">
+      <label>캐릭터 참조 이미지 (선택)</label>
+      <div class="ref-upload">
+        <input type="file" id="ref-file" accept="image/png,image/jpeg,image/webp" hidden>
+        <button type="button" id="ref-pick" class="btn-secondary">🖼 이미지 올리기</button>
+        <div id="ref-preview" class="ref-preview" hidden>
+          <img id="ref-img" alt="참조 이미지 미리보기">
+          <button type="button" id="ref-remove" class="btn-icon" title="참조 이미지 제거">✕</button>
+        </div>
+      </div>
+      <p class="hint">내 캐릭터 그림을 올리면 AI가 그 캐릭터의 생김새를 그대로 따라 그려서 일관성이 훨씬 좋아져요.</p>
+    </div>
+
     <div class="options-grid">
       <div class="form-row">
         <label for="count">개수</label>
@@ -73,7 +87,18 @@
           <option value="korean">이모티콘에 한글 문구 포함</option>
         </select>
       </div>
+      <div class="form-row">
+        <label for="format">형식</label>
+        <select id="format">
+          <option value="static" selected>정지 이모티콘 (PNG)</option>
+          <option value="animated">움직이는 이모티콘 (APNG+GIF, 4프레임)</option>
+        </select>
+      </div>
     </div>
+    <div class="form-row checkbox-row">
+      <label><input type="checkbox" id="transparent-bg" checked> 배경 투명하게 만들기</label>
+    </div>
+    <p class="hint" id="animated-hint" hidden>움직이는 이모티콘은 컷마다 4장을 그려서 이미지 생성량(비용/시간)이 4배가 돼요.</p>
     <div class="example-chips">
       <span class="chips-label">예시:</span>
       <button class="chip" type="button">여름 더위에 시달리는 너구리</button>
@@ -118,6 +143,9 @@
 </footer>
 
 <script src="js/zip.js"></script>
+<script src="js/imageproc.js"></script>
+<script src="js/apng.js"></script>
+<script src="js/gif.js"></script>
 <script src="js/providers.js"></script>
 <script src="js/app.js"></script>
 </body>
