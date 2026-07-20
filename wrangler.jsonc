@@ -6,6 +6,9 @@
   "ai": {
     "binding": "AI"
   },
+  "vars": {
+    "GLOBAL_DAILY_NEURON_BUDGET": "9000"
+  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

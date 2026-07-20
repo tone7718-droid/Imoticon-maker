@@ -54,12 +54,12 @@
     return PROFILES[key] || PROFILES.generic;
   }
 
-  function estimate({ count, format, hasReference }) {
+  function estimate({ count, format, hasReference, plannerNeurons = 120 }) {
     const frames = format === "animated-ai" ? 6 : 1;
     const canonicalCalls = hasReference ? 0 : 1;
     const imageCalls = canonicalCalls + count * frames;
     const referenceCalls = count * frames;
-    const neurons = imageCalls * 104.2 + referenceCalls * 5.37 + 50;
+    const neurons = imageCalls * 104.2 + referenceCalls * 5.37 + plannerNeurons;
     return {
       imageCalls,
       referenceCalls,

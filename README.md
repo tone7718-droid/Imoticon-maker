@@ -15,9 +15,12 @@
 - **비용 없는 기본 애니메이션** — AI 이미지 한 장을 브라우저에서 6프레임으로 움직입니다.
 - **선택형 AI 애니메이션** — 컷마다 6장을 생성하며, 시작 전에 예상 이미지 수와 Neurons를 확인합니다.
 - **취소 보장** — 중단 신호 이후에는 새 이미지 작업을 꺼내지 않으며 진행 상태를 완료로 잘못 표시하지 않습니다.
+- **중단 후 이어 만들기** — 대기 중인 전체 항목 또는 개별 컷을 다시 생성할 수 있습니다.
 - **메모리 관리** — 대형 base64 문자열을 세션에 쌓지 않고 Blob Object URL을 사용하고 재생성·세션 종료 시 해제합니다.
+- **안전한 서버 프롬프트** — 브라우저는 캐릭터·장면·스타일 같은 구조화 필드만 전송하고 Worker가 허용된 템플릿으로 최종 프롬프트를 조립합니다.
+- **부분 결과 보존** — 실패나 중단이 있어도 완성된 결과만 부분 ZIP으로 받을 수 있으며, 제출용 전체 ZIP과 구분됩니다.
 - **플랫폼별 프로필과 다운로드 전 검사**
-  - 일반: 360×360 PNG/APNG/GIF, 10·12·15개
+  - 일반: 360×360 PNG/APNG/GIF, 카드별 APNG·GIF 다운로드, 10·12·15개
   - 카카오 정지 시안: 360×360 PNG, 32개
   - LINE 정지: 최대 캔버스 370×320 PNG, 8·16·24개
   - LINE 애니메이션: 320×270 APNG, 6프레임, 4회 반복, 8·16·24개
@@ -27,20 +30,23 @@
 
 ## 무료 할당량과 제한
 
-Cloudflare Workers AI는 계정당 하루 10,000 Neurons 무료 할당량을 제공합니다. FLUX.2 Klein 4B의 1024×1024 출력은 약 104.2 Neurons, 511px 참조 입력은 약 5.37 Neurons으로 추정합니다.
+Cloudflare Workers AI는 계정당 하루 10,000 Neurons 무료 할당량을 제공합니다. FLUX.2 Klein 4B의 1024×1024 출력은 약 104.2 Neurons, 511px 참조 입력은 약 5.37 Neurons으로 추정합니다. 기획 호출은 출력 토큰 변동을 고려해 120 Neurons로 보수적으로 예약합니다.
 
 - 정지 15개 + 자동 기준 이미지: 약 16회 이미지 호출
 - 로컬 애니메이션 15개 + 자동 기준 이미지: 약 16회 이미지 호출
 - AI 6프레임 애니메이션 10개 + 자동 기준 이미지: 약 61회 이미지 호출
-- AI 6프레임 애니메이션 15개: 익명 사용자 일일 이미지 한도 80장을 초과하므로 UI에서 차단
+- AI 6프레임 애니메이션 15개: 네트워크별 일일 이미지 한도 80장을 초과하므로 UI에서 차단
 
-앱은 익명 브라우저 ID와 접속 IP의 해시 조합으로 다음 제한을 적용합니다.
+앱은 사용자가 변경할 수 있는 브라우저 ID를 보안 판단에 사용하지 않습니다. 대신 두 단계 제한을 적용합니다.
 
-- 기획: 하루 12회
-- 이미지: 하루 80장
-- 요청 속도: 분당 24회
+- 서비스 전체: 하루 최대 9,000 Neurons 예약 후 자동 차단
+- 접속 IP 해시별 기획: 하루 12회
+- 접속 IP 해시별 이미지: 하루 80장
+- 접속 IP 해시별 요청 속도: 분당 24회
 
-이 제한은 한 사용자가 운영 계정의 무료 할당량을 모두 소진하는 것을 줄이기 위한 앱 수준 제한입니다. 운영 계정 전체의 Cloudflare 무료 할당량이 먼저 소진될 수 있습니다.
+9,000 Neurons 상한은 `wrangler.jsonc`의 `GLOBAL_DAILY_NEURON_BUDGET`으로 더 낮출 수 있으며 10,000보다 높게 설정할 수 없습니다. 무료 플랜은 Cloudflare 한도를 넘으면 추가 호출이 실패하고, Paid 플랜에서는 이 앱의 전역 상한이 예상치 못한 초과 비용을 막는 kill switch 역할을 합니다. 앱과 Cloudflare의 일일 기준은 모두 00:00 UTC에 초기화됩니다.
+
+AI 바인딩 호출 자체가 예외를 반환하면 IP별 호출 횟수는 환불합니다. 실제 추론 시작 여부를 확실히 알 수 없으므로 서비스 전체 Neurons 예약은 비용 방어를 위해 유지합니다.
 
 ## 로컬 실행
 
@@ -64,7 +70,8 @@ npm run deploy
 
 - `AI`: Workers AI 바인딩
 - `ASSETS`: `public/` 정적 파일
-- `QUOTA_COUNTER`: 익명 사용자별 할당량을 원자적으로 관리하는 SQLite Durable Object
+- `QUOTA_COUNTER`: 전역 예산과 IP별 할당량을 원자적으로 관리하는 SQLite Durable Object
+- `GLOBAL_DAILY_NEURON_BUDGET`: 서비스 전체 일일 보호 예산, 기본 9,000 Neurons
 
 첫 배포 시 `v1` Durable Object 마이그레이션이 자동 적용됩니다. 별도의 API 키나 `.dev.vars`는 필요하지 않습니다.
 
@@ -73,17 +80,18 @@ npm run deploy
 ```text
 브라우저
   ├─ POST /api/plan  ──> Worker ──> Gemma 기획 JSON ──> 스키마 보정
-  ├─ POST /api/image ──> Worker ──> FLUX.2 Klein 4B
+  ├─ 구조화 이미지 필드 ──> Worker 프롬프트 템플릿 ──> FLUX.2 Klein 4B
   └─ Canvas/APNG/GIF/ZIP: 브라우저 내부 처리
 
 Worker
   ├─ AI 바인딩: 공급자 비밀키가 브라우저에 없음
-  ├─ Durable Object: 일일/분당 할당량
+  ├─ Durable Object: 전역 Neurons 예산 + IP별 일일/분당 할당량
+  ├─ 동일 Origin 및 Sec-Fetch-Site 검사
   └─ 보안 헤더: CSP, no-referrer, nosniff, frame 차단
 ```
 
 1. 모델이 캐릭터 설명과 정확한 개수의 장면 JSON을 반환합니다.
-2. JSON에 누락·중복이 있으면 Worker가 안전한 기본 장면으로 보정합니다.
+2. JSON에 누락·중복이 있으면 Worker가 안전한 기본 장면으로 보정하고 보완 개수를 UI에 알립니다.
 3. 참조 이미지가 없으면 캐릭터 기준 이미지를 한 장 생성합니다.
 4. 모든 컷은 같은 기준 이미지를 FLUX 편집 입력으로 사용합니다.
 5. 흰 배경 제거와 한글 문구는 브라우저에서 처리합니다.
@@ -92,9 +100,10 @@ Worker
 ## 개인정보와 보안
 
 - API 키는 브라우저·`localStorage`·저장소에 존재하지 않습니다.
-- `localStorage`에는 할당량 구분용 무작위 익명 ID만 저장합니다. 인증정보가 아닙니다.
 - 프롬프트와 참조 이미지는 이 사이트의 Cloudflare Worker 및 Workers AI로 전송됩니다.
-- Worker는 원본 IP를 저장하지 않고 IP와 익명 ID를 SHA-256으로 해시해 Durable Object 이름을 결정합니다.
+- Worker는 원본 IP를 저장하지 않고 IP만 SHA-256으로 해시해 Durable Object 이름을 결정합니다.
+- 모든 생성 POST는 현재 Worker와 정확히 같은 Origin만 허용하며 교차 사이트 요청을 403으로 거부합니다.
+- 참조 이미지는 MIME·2MB 용량뿐 아니라 실제 픽셀 크기도 서버에서 판독해 가로·세로 511px 이하만 허용합니다.
 - 프롬프트와 이미지 결과를 별도 데이터베이스에 저장하지 않습니다.
 - `Content-Security-Policy`는 동일 출처 API, data/blob 이미지 외의 외부 연결과 스크립트를 차단합니다.
 
@@ -105,7 +114,7 @@ public/
   index.html            UI
   css/style.css         반응형 스타일
   js/app.js             생성·취소·카드·다운로드 파이프라인
-  js/providers.js       동일 출처 Worker API 어댑터와 프롬프트
+  js/providers.js       동일 출처 Worker API 어댑터와 구조화 이미지 요청
   js/profiles.js        플랫폼 규격과 사용량 추정
   js/imageproc.js       리사이즈·문구·로컬 애니메이션·투명화
   js/apng.js            APNG 인코더
@@ -126,8 +135,11 @@ npx wrangler deploy --dry-run
 자동 테스트는 다음을 검증합니다.
 
 - 기획 JSON의 정확한 개수, 중복 제거, 문구 모드
-- 일일·분당 Durable Object 할당량
+- 서비스 전체 Neurons 상한과 IP별 일일·분당 Durable Object 할당량
+- 클라이언트 ID 변경 우회 방지 및 교차 사이트 요청 차단
+- 서버 프롬프트 템플릿과 참조 이미지 픽셀 판독
 - 플랫폼별 개수·형식·용량·프레임 검사
+- 중단 재개·부분 ZIP·카드별 GIF 컨트롤 존재
 - 로컬 애니메이션과 AI 애니메이션의 호출량 계산
 - APNG의 프레임/반복 제어 청크
 - GIF89a 반복 스트림과 ZIP 헤더

@@ -247,6 +247,7 @@ input:focus, select:focus, textarea:focus {
   margin-top: 12px;
 }
 .results-actions .btn-primary { width: auto; padding: 10px 20px; }
+.results-actions .btn-secondary { padding: 9px 14px; }
 .results-actions select { width: auto; }
 .profile-badge {
   display: inline-flex;
@@ -306,6 +307,7 @@ input:focus, select:focus, textarea:focus {
   font-family: inherit;
 }
 .emoji-card .card-actions button:hover { border-color: var(--accent); }
+.emoji-card .card-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
 .emoji-card.loading .img-wrap::after {
   content: "";
   width: 32px; height: 32px;
@@ -316,6 +318,8 @@ input:focus, select:focus, textarea:focus {
 }
 .emoji-card.error .img-wrap { background: #fdf0ee; }
 .emoji-card .error-msg { color: #c0392b; font-size: 0.8rem; word-break: break-all; }
+.emoji-card.pending .img-wrap { background: #f8f5ef; }
+.emoji-card .pending-msg { color: var(--muted); font-size: 0.82rem; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -330,5 +334,6 @@ input:focus, select:focus, textarea:focus {
   .card { padding: 16px; }
   .site-header { padding-top: 28px; }
   .results-header .results-actions { align-items: stretch; }
-  .results-actions .btn-primary { width: 100%; }
+  .results-actions .btn-primary,
+  .results-actions .btn-secondary { width: 100%; }
 }

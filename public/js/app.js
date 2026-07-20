@@ -31,19 +31,14 @@
     validationSummary: $("#validation-summary"),
     exportProfile: $("#export-profile"),
     resultsGrid: $("#results-grid"),
+    resumeBtn: $("#resume-btn"),
+    downloadPartialBtn: $("#download-partial-btn"),
     downloadAllBtn: $("#download-all-btn"),
   };
 
   const provider = window.Providers.cloudflare;
   const CONCURRENCY = 2;
-  const AI_FRAME_DESCRIPTIONS = [
-    "the base pose at the start of the motion",
-    "a subtle upward bounce with a small anticipation movement",
-    "the peak of the bounce with a natural expressive reaction",
-    "settling back down with a slight secondary motion",
-    "a small overshoot in the opposite direction",
-    "returning seamlessly to the exact base pose",
-  ];
+  const AI_FRAME_COUNT = 6;
   const FORMAT_LABELS = {
     static: "정지 PNG",
     "animated-local": "로컬 애니메이션 (무료·6프레임)",
@@ -67,7 +62,9 @@
   els.transparentBg.addEventListener("change", updateEstimate);
   els.generateBtn.addEventListener("click", startGeneration);
   els.cancelBtn.addEventListener("click", () => abortController?.abort());
-  els.downloadAllBtn.addEventListener("click", downloadAllAsZip);
+  els.resumeBtn.addEventListener("click", resumePending);
+  els.downloadPartialBtn.addEventListener("click", () => downloadAsZip(true));
+  els.downloadAllBtn.addEventListener("click", () => downloadAsZip(false));
   window.addEventListener("beforeunload", cleanupSession);
 
   document.querySelectorAll(".chip").forEach((chip) => {
@@ -90,7 +87,8 @@
       els.serviceStatus.querySelector("span:last-child").textContent = "무료 AI Worker 연결됨";
       els.serviceDetail.textContent =
         `기획: ${serviceConfig.plannerModel} · 이미지: ${serviceConfig.imageModel} · ` +
-        `익명 사용자별 하루 이미지 ${serviceConfig.dailyLimits.images}장`;
+        `네트워크별 하루 이미지 ${serviceConfig.dailyLimits.images}장 · ` +
+        `서비스 보호 예산 ${serviceConfig.dailyLimits.globalNeurons.toLocaleString()} Neurons`;
       els.generateBtn.disabled = false;
       updateEstimate();
     } catch (error) {
@@ -131,6 +129,7 @@
       count: Number(els.count.value || currentProfile().counts[0]),
       format: els.format.value || currentProfile().formats[0],
       hasReference: !!referenceImage,
+      plannerNeurons: serviceConfig?.pricing?.plannerNeuronEstimate,
     });
   }
 
@@ -139,10 +138,10 @@
     const dailyLimit = serviceConfig?.dailyLimits?.images || 80;
     els.usageEstimate.textContent =
       `AI 이미지 ${estimate.imageCalls}장 · 약 ${estimate.neurons.toLocaleString()} Neurons ` +
-      `(익명 일일 한도 ${dailyLimit}장)`;
+      `(네트워크별 일일 한도 ${dailyLimit}장)`;
     const overLimit = estimate.imageCalls > dailyLimit;
     els.usageNote.textContent = overLimit
-      ? "현재 선택은 익명 일일 이미지 한도를 초과합니다. 개수나 형식을 줄여 주세요."
+      ? "현재 선택은 네트워크별 일일 이미지 한도를 초과합니다. 개수나 형식을 줄여 주세요."
       : els.format.value === "animated-ai"
         ? "AI 애니메이션은 컷마다 6장을 생성합니다. 시작 전에 한 번 더 확인해요."
         : els.format.value === "animated-local"
@@ -219,6 +218,7 @@
         profileKey,
         profile,
         character: plan.character,
+        fallbackCount: plan.fallbackCount || 0,
         styleKey: els.style.value,
         format,
         transparent: els.transparentBg.checked,
@@ -253,12 +253,18 @@
       els.characterSummary.textContent = `캐릭터 설정: ${plan.character}`;
       els.exportProfile.textContent =
         `${profile.label} · ${profile.width}×${profile.height} · ${count}개`;
-      setValidationSummary("생성 후 파일 크기와 프레임 규격을 다시 검사합니다.", "");
+      setValidationSummary(
+        plan.fallbackCount
+          ? `기획 결과가 부족해 기본 장면 ${plan.fallbackCount}개로 보완했습니다. 생성 후 파일 규격을 검사합니다.`
+          : "생성 후 파일 크기와 프레임 규격을 다시 검사합니다.",
+        plan.fallbackCount ? "warning" : ""
+      );
       els.sectionResults.hidden = false;
       session.items.forEach((item, index) => {
         item.card = createCard(item, index);
         els.resultsGrid.appendChild(item.card);
       });
+      updateResultActions();
 
       const queue = session.items.map((item, index) => ({ item, index }));
       const workers = Array.from({ length: CONCURRENCY }, async () => {
@@ -289,12 +295,16 @@
     } finally {
       abortController = null;
       els.generateBtn.disabled = !serviceConfig;
+      refreshResultState();
     }
   }
 
   async function createCanonicalReference(signal) {
-    const prompt = window.PromptBuilder.buildCanonicalPrompt(session.character, session.styleKey);
-    let image = await provider.generateImage(prompt, { signal });
+    let image = await provider.generateImage({
+      mode: "canonical",
+      character: session.character,
+      styleKey: session.styleKey,
+    }, { signal });
     if (session.transparent) image = await window.ImageProc.removeWhiteBackground(image).catch(() => image);
     const normalized = await window.ImageProc.normalizeReference(image, 511);
     return window.ImageProc.dataUrlToParts(normalized);
@@ -341,10 +351,9 @@
   async function generateAiAnimation(item, signal, onImage) {
     const rawFrames = [];
     let frameReference = session.reference;
-    for (let index = 0; index < AI_FRAME_DESCRIPTIONS.length; index++) {
+    for (let index = 0; index < AI_FRAME_COUNT; index++) {
       if (signal.aborted) throw new DOMException("중단됨", "AbortError");
       const art = await generateArt(item, signal, frameReference, {
-        frameDesc: AI_FRAME_DESCRIPTIONS[index],
         frameIndex: index,
         refMode: index === 0 ? "user" : "frame",
       });
@@ -363,17 +372,15 @@
   }
 
   async function generateArt(item, signal, reference, options) {
-    const prompt = window.PromptBuilder.buildImagePrompt(
-      session.character,
-      item.idea,
-      session.styleKey,
-      {
-        frameDesc: options.frameDesc,
-        frameIndex: options.frameIndex ?? 0,
-        refMode: options.refMode || (reference ? "user" : null),
-      }
-    );
-    let image = await provider.generateImage(prompt, { signal, reference });
+    const refMode = options.refMode || (reference ? "user" : null);
+    let image = await provider.generateImage({
+      mode: refMode === "frame" ? "frame" : "sticker",
+      character: session.character,
+      scene: item.idea.scene,
+      styleKey: session.styleKey,
+      frameIndex: options.frameIndex ?? 0,
+      hasCaption: !!item.idea.caption,
+    }, { signal, reference });
     if (session.transparent) image = await window.ImageProc.removeWhiteBackground(image).catch(() => image);
     return image;
   }
@@ -401,6 +408,7 @@
   function updateCardInto(card, item, index) {
     card.classList.toggle("loading", item.status === "loading");
     card.classList.toggle("error", item.status === "error");
+    card.classList.toggle("pending", item.status === "pending");
     card.querySelector(".title").textContent = `${index + 1}. ${item.idea.title}`;
     const imageWrap = card.querySelector(".img-wrap");
     const actions = card.querySelector(".card-actions");
@@ -415,11 +423,18 @@
 
       const download = document.createElement("button");
       download.textContent = item.frames ? "⬇ APNG" : "⬇ PNG";
-      download.addEventListener("click", () => downloadOne(item, index));
+      download.addEventListener("click", () => downloadOne(item, index, item.frames ? "apng" : "png"));
+      actions.appendChild(download);
+      if (item.frames && session.profileKey === "generic") {
+        const gif = document.createElement("button");
+        gif.textContent = "⬇ GIF";
+        gif.addEventListener("click", () => downloadOne(item, index, "gif"));
+        actions.appendChild(gif);
+      }
       const regenerate = document.createElement("button");
       regenerate.textContent = "🔄 다시";
       regenerate.addEventListener("click", () => regenerateOne(item, index));
-      actions.append(download, regenerate);
+      actions.appendChild(regenerate);
     } else if (item.status === "error") {
       const message = document.createElement("div");
       message.className = "error-msg";
@@ -429,30 +444,119 @@
       retry.textContent = "🔄 다시 시도";
       retry.addEventListener("click", () => regenerateOne(item, index));
       actions.appendChild(retry);
+    } else if (item.status === "pending") {
+      const message = document.createElement("div");
+      message.className = "pending-msg";
+      message.textContent = "생성 대기";
+      imageWrap.appendChild(message);
+      const retry = document.createElement("button");
+      retry.textContent = "▶ 이 컷 생성";
+      retry.disabled = !!abortController;
+      retry.addEventListener("click", () => regenerateOne(item, index));
+      actions.appendChild(retry);
     }
   }
 
   async function regenerateOne(item, index) {
-    if (!session || item.status === "loading") return;
+    if (!session || abortController || item.status === "loading") return;
     const controller = new AbortController();
-    await generateOne(item, index, controller.signal);
+    try {
+      await generateOne(item, index, controller.signal);
+    } finally {
+      refreshResultState();
+    }
   }
 
-  async function downloadOne(item, index) {
+  async function resumePending() {
+    if (!session || abortController) return;
+    const pending = session.items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.status === "pending");
+    if (!pending.length) return;
+
+    abortController = new AbortController();
+    const signal = abortController.signal;
+    els.generateBtn.disabled = true;
+    els.sectionProgress.hidden = false;
+    const callsPerItem = session.format === "animated-ai" ? AI_FRAME_COUNT : 1;
+    const totalImages = pending.length * callsPerItem;
+    let completedImages = 0;
+    const onImage = (message) => {
+      completedImages += 1;
+      setProgress(
+        Math.round((completedImages / totalImages) * 100),
+        `${message} (${completedImages}/${totalImages}장)`
+      );
+    };
+    setProgress(0, `중단된 ${pending.length}개 항목을 이어서 만들고 있어요…`);
+    refreshResultState();
+
+    try {
+      const queue = [...pending];
+      const workers = Array.from({ length: CONCURRENCY }, async () => {
+        while (queue.length && !signal.aborted) {
+          const next = queue.shift();
+          await generateOne(next.item, next.index, signal, onImage);
+        }
+      });
+      await Promise.all(workers);
+      if (signal.aborted) throw new DOMException("중단됨", "AbortError");
+      const failed = session.items.filter((item) => item.status === "error").length;
+      setProgress(100, failed ? `${failed}개가 실패했어요. 카드에서 다시 시도해 주세요.` : "남은 항목을 모두 완성했어요! 🎉");
+    } catch (error) {
+      if (error.name === "AbortError") {
+        setProgress(0, "이어 만들기를 중단했어요. 완성된 결과는 그대로 보관됩니다.");
+      } else {
+        setProgress(0, `오류: ${error.message}`);
+        alert(`이어 만들기 중 오류가 발생했어요.\n\n${error.message}`);
+      }
+    } finally {
+      abortController = null;
+      els.generateBtn.disabled = !serviceConfig;
+      refreshResultState();
+    }
+  }
+
+  function refreshResultState() {
+    if (!session) return;
+    session.items.forEach(updateCard);
+    updateResultActions();
+  }
+
+  function updateResultActions() {
+    if (!session) return;
+    const completed = session.items.filter((item) => item.status === "done" && item.dataUrl).length;
+    const pending = session.items.filter((item) => item.status === "pending").length;
+    const incomplete = completed !== session.items.length;
+    els.resumeBtn.hidden = !!abortController || pending === 0;
+    els.downloadPartialBtn.hidden = !!abortController || completed === 0 || !incomplete;
+    els.downloadPartialBtn.textContent = `⬇ 완성된 ${completed}개 부분 ZIP`;
+    els.downloadAllBtn.disabled = !!abortController || incomplete;
+  }
+
+  async function downloadOne(item, index, format) {
     try {
       let bytes;
-      if (item.frames) {
+      let mimeType;
+      let extension;
+      if (format === "gif") {
+        bytes = await buildGifBytes(item);
+        mimeType = "image/gif";
+        extension = "gif";
+      } else if (item.frames) {
         bytes = await buildApngBytes(item);
+        mimeType = "image/png";
+        extension = "png";
       } else {
         bytes = await buildPngBytes(item);
+        mimeType = "image/png";
+        extension = "png";
       }
-      const issues = window.ExportProfiles.validateFile(
-        session.profileKey,
-        bytes.length,
-        item.frames?.length || 0
+      const issues = format === "gif" ? [] : window.ExportProfiles.validateFile(
+        session.profileKey, bytes.length, item.frames?.length || 0
       );
       if (issues.length) throw new Error(issues.join(" "));
-      saveBlob(new Blob([bytes], { type: "image/png" }), fileNameFor(item, index, "png"));
+      saveBlob(new Blob([bytes], { type: mimeType }), fileNameFor(item, index, extension));
     } catch (error) {
       alert(`저장 전 규격 검사 실패: ${error.message}`);
     }
@@ -489,17 +593,20 @@
     return window.makeGif(imageData, session.profile.animated?.delayMs || 150);
   }
 
-  async function downloadAllAsZip() {
+  async function downloadAsZip(partial) {
     if (!session) return;
     const completed = session.items
       .map((item, index) => ({ item, index }))
       .filter(({ item }) => item.status === "done" && item.dataUrl);
-    if (completed.length !== session.items.length) {
+    if (!completed.length) return alert("먼저 한 개 이상의 이모티콘을 완성해 주세요.");
+    if (!partial && completed.length !== session.items.length) {
       return alert("세트의 모든 이모티콘을 완성한 뒤 다운로드해 주세요.");
     }
 
     els.downloadAllBtn.disabled = true;
-    els.downloadAllBtn.textContent = "검증하고 묶는 중…";
+    els.downloadPartialBtn.disabled = true;
+    const activeButton = partial ? els.downloadPartialBtn : els.downloadAllBtn;
+    activeButton.textContent = "검증하고 묶는 중…";
     try {
       const files = [];
       const validation = [];
@@ -529,7 +636,12 @@
         generatedAt: new Date().toISOString(),
         profile: session.profileKey,
         size: `${session.profile.width}x${session.profile.height}`,
-        count: completed.length,
+        partial,
+        expectedCount: session.items.length,
+        completedCount: completed.length,
+        missingIndexes: session.items
+          .map((item, index) => item.status === "done" && item.dataUrl ? null : index + 1)
+          .filter(Boolean),
         format: session.format,
         character: session.character,
         items: completed.map(({ item, index }) => ({ index: index + 1, title: item.idea.title })),
@@ -538,13 +650,19 @@
         name: "manifest.json",
         data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
       });
-      saveBlob(window.makeZip(files), `imoticons_${session.profileKey}.zip`);
-      setValidationSummary("모든 파일이 선택한 플랫폼의 크기·용량·프레임 검사를 통과했어요.", "");
+      saveBlob(window.makeZip(files), `imoticons_${session.profileKey}${partial ? "_partial" : ""}.zip`);
+      setValidationSummary(
+        partial
+          ? `완성된 ${completed.length}개를 부분 ZIP으로 저장했습니다. 제출 전 전체 세트를 완성해 주세요.`
+          : "모든 파일이 선택한 플랫폼의 크기·용량·프레임 검사를 통과했어요.",
+        partial ? "warning" : ""
+      );
     } catch (error) {
       alert(`ZIP을 만들 수 없어요.\n\n${error.message}`);
     } finally {
-      els.downloadAllBtn.disabled = false;
-      els.downloadAllBtn.textContent = "⬇ 검증 후 ZIP 다운로드";
+      els.downloadPartialBtn.disabled = false;
+      els.downloadAllBtn.textContent = "⬇ 제출용 전체 ZIP";
+      updateResultActions();
     }
   }
 

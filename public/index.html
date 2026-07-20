@@ -27,8 +27,8 @@
       Cloudflare Worker를 거쳐 Workers AI에서 처리됩니다.
     </p>
     <p class="hint">
-      기본 한도: 익명 사용자별 하루 기획 12회·이미지 80장. 무료 할당량은 운영 계정 전체 사용량에 따라
-      먼저 소진될 수 있어요.
+      기본 한도: 접속 네트워크별 하루 기획 12회·이미지 80장, 서비스 전체 하루 9,000 Neurons.
+      동일 출처 요청만 생성 API를 사용할 수 있어요.
     </p>
   </section>
 
@@ -125,7 +125,9 @@
       <p id="validation-summary" class="validation-summary" role="status"></p>
       <div class="results-actions">
         <span id="export-profile" class="profile-badge"></span>
-        <button id="download-all-btn" class="btn-primary">⬇ 검증 후 ZIP 다운로드</button>
+        <button id="resume-btn" class="btn-secondary" hidden>▶ 남은 항목 계속 생성</button>
+        <button id="download-partial-btn" class="btn-secondary" hidden>⬇ 부분 ZIP</button>
+        <button id="download-all-btn" class="btn-primary" disabled>⬇ 제출용 전체 ZIP</button>
       </div>
     </div>
     <div class="grid" id="results-grid"></div>
