@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>이모티콘 메이커 — AI로 뚝딱 만드는 나만의 이모티콘</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
+</head>
+<body>
+
+<header class="site-header">
+  <h1>🎨 이모티콘 메이커</h1>
+  <p class="tagline">캐릭터와 상황을 설명하면, AI가 이모티콘 세트를 통째로 만들어 드려요.</p>
+</header>
+
+<main>
+  <!-- STEP 1: API 설정 -->
+  <section class="card" id="section-api">
+    <h2><span class="step-num">1</span> AI 연결하기</h2>
+    <div class="form-row">
+      <label for="provider">AI 제공자</label>
+      <select id="provider">
+        <option value="gemini">Google Gemini (추천 · 무료 할당량 있음)</option>
+        <option value="openai">OpenAI (GPT + gpt-image / DALL·E)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label for="api-key">API 키</label>
+      <div class="key-input-wrap">
+        <input type="password" id="api-key" placeholder="API 키를 붙여넣으세요" autocomplete="off">
+        <button type="button" id="toggle-key" class="btn-icon" title="키 보기/숨기기">👁</button>
+      </div>
+    </div>
+    <div class="form-row checkbox-row">
+      <label><input type="checkbox" id="save-key"> 이 브라우저에 키 저장 (내 컴퓨터에만 저장돼요)</label>
+    </div>
+    <p class="hint" id="key-hint">
+      키 발급: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" data-provider="gemini">Google AI Studio</a>
+      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" data-provider="openai" hidden>OpenAI 대시보드</a>
+      — 키는 서버로 전송되지 않고, 브라우저에서 AI API로 직접 호출돼요.
+    </p>
+  </section>
+
+  <!-- STEP 2: 이모티콘 설명 -->
+  <section class="card" id="section-prompt">
+    <h2><span class="step-num">2</span> 어떤 이모티콘을 만들까요?</h2>
+    <textarea id="description" rows="4"
+      placeholder="예) 여름에 더위에 시달리는 너구리 캐릭터를 기반으로 이모티콘을 만들어줘. 상황에 따라서 표정 변화와 그 감정을 잘 느낄 수 있도록 해주면 돼."></textarea>
+    <div class="options-grid">
+      <div class="form-row">
+        <label for="count">개수</label>
+        <select id="count">
+          <option value="10">10개</option>
+          <option value="12">12개</option>
+          <option value="15" selected>15개</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="style">그림 스타일</label>
+        <select id="style">
+          <option value="cute-sticker" selected>귀여운 스티커풍 (굵은 외곽선)</option>
+          <option value="soft-pastel">부드러운 파스텔톤</option>
+          <option value="bold-cartoon">진한 카툰풍</option>
+          <option value="minimal-line">미니멀 라인 드로잉</option>
+          <option value="watercolor">수채화풍</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="caption-mode">텍스트 문구</label>
+        <select id="caption-mode">
+          <option value="none" selected>문구 없이 그림만</option>
+          <option value="korean">이모티콘에 한글 문구 포함</option>
+        </select>
+      </div>
+    </div>
+    <div class="example-chips">
+      <span class="chips-label">예시:</span>
+      <button class="chip" type="button">여름 더위에 시달리는 너구리</button>
+      <button class="chip" type="button">월요일이 싫은 직장인 고양이</button>
+      <button class="chip" type="button">시험공부하는 햄스터</button>
+      <button class="chip" type="button">운동을 결심만 하는 펭귄</button>
+    </div>
+    <button id="generate-btn" class="btn-primary">✨ 이모티콘 만들기</button>
+  </section>
+
+  <!-- 진행 상황 -->
+  <section class="card" id="section-progress" hidden>
+    <h2>🛠 만드는 중…</h2>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <p id="progress-text">이모티콘 아이디어를 기획하고 있어요…</p>
+    <button id="cancel-btn" class="btn-secondary">중단하기</button>
+  </section>
+
+  <!-- 결과 -->
+  <section id="section-results" hidden>
+    <div class="results-header card">
+      <h2>🎉 완성된 이모티콘</h2>
+      <p id="character-summary" class="hint"></p>
+      <div class="results-actions">
+        <div class="form-row inline">
+          <label for="export-size">저장 크기</label>
+          <select id="export-size">
+            <option value="360" selected>360×360 (카카오 이모티콘)</option>
+            <option value="512">512×512 (라인/텔레그램)</option>
+            <option value="0">원본 크기</option>
+          </select>
+        </div>
+        <button id="download-all-btn" class="btn-primary">⬇ 전체 ZIP 다운로드</button>
+      </div>
+    </div>
+    <div class="grid" id="results-grid"></div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <p>이모티콘 메이커 · API 키와 생성 결과는 모두 내 브라우저 안에서만 처리됩니다.</p>
+</footer>
+
+<script src="js/zip.js"></script>
+<script src="js/providers.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
